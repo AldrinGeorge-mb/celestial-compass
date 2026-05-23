@@ -1,28 +1,10 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const apiRoutes = require('./routes/api');
+// backend/server.js
+// Local development entry point only.
+// Imports the shared Express app and calls listen().
+// In production (Vercel), api/index.js is used instead — it never calls listen().
 
-const app = express();
+const app  = require('./app');
 
-// ── Middleware ─────────────────────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
-
-// Request logger — helpful during development
-app.use((req, _res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    next();
-});
-
-// ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api', apiRoutes);
-
-// ── Health check ──────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-
-// ── Start ─────────────────────────────────────────────────────────────────────
-// Port 5001 avoids the conflict with Vite's default dev-server port (5173/3000/5000).
 const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => {

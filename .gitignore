@@ -8,12 +8,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables — NEVER commit real keys
 .env
+backend/.env
 
 # Build outputs
 /dist
 /build
+frontend/dist
 
 # IDE files
 .vscode/

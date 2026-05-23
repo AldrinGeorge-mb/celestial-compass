@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
 
+  // base: '/' ensures asset paths are absolute after build (required for Vercel)
+  base: '/',
+
   server: {
     port: 3000, // Frontend dev server on 3000
     proxy: {
