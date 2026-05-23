@@ -1,84 +1,43 @@
+// backend/routes/api.js
+// Thin routing layer. No business logic lives here — only route definitions
+// and middleware attachment. Each route delegates to a dedicated controller.
+
 const express = require('express');
-const router = express.Router();
 const axios = require('axios');
-const { staticEvents } = require('../data/staticEvents');
+const router = express.Router();
 
-router.get('/events', async (req, res) => {
-    const locationQuery = req.query.location;
-    console.log(`\n--- New Event Request for "${locationQuery}" ---`);
+const { getApod } = require('../controllers/apodController');
+const { getEvents } = require('../controllers/eventsController');
+const { cacheMiddleware } = require('../middleware/cache');
 
-    if (!locationQuery) {
-        return res.status(400).json({ message: "A location query is required." });
-    }
+// ── APOD ──────────────────────────────────────────────────────────────────────
+// Cache for 24 hours: NASA publishes a new picture once per day.
+router.get('/apod', cacheMiddleware(86400), getApod);
 
-    const POSITIONSTACK_API_KEY = process.env.POSITIONSTACK_API_KEY;
-    const N2YO_API_KEY = process.env.N2YO_API_KEY;
+// ── Sky Events ────────────────────────────────────────────────────────────────
+// Cache per-location for 5 minutes: ISS orbital data changes, but not by the second.
+router.get('/events', cacheMiddleware(300), getEvents);
 
-    console.log(`[DEBUG] Positionstack Key Loaded: ${!!POSITIONSTACK_API_KEY}`);
-    console.log(`[DEBUG] N2YO Key Loaded:          ${!!N2YO_API_KEY}`);
-
-    try {
-        const geocodeUrl = `http://api.positionstack.com/v1/forward?access_key=${POSITIONSTACK_API_KEY}&query=${encodeURIComponent(locationQuery)}&limit=1`;
-        console.log(`[DEBUG] Calling Positionstack URL: ${geocodeUrl}`);
-        const geoResponse = await axios.get(geocodeUrl);
-
-        if (!geoResponse.data || geoResponse.data.data.length === 0) {
-            return res.status(404).json({ message: `Could not find coordinates for location: ${locationQuery}` });
-        }
-        const { latitude, longitude, label } = geoResponse.data.data[0];
-        console.log(`[DEBUG] Coordinates found: Lat ${latitude}, Lon ${longitude}`);
-
-        const n2yoUrl = `https://api.n2yo.com/rest/v1/satellite/radiopasses/25544/${latitude}/${longitude}/0/2/10/&apiKey=${N2YO_API_KEY}`;
-        console.log(`[DEBUG] Calling N2YO URL: ${n2yoUrl}`);
-        const n2yoResponse = await axios.get(n2yoUrl);
-        const passes = n2yoResponse.data.passes || [];
-
-        const liveFlyoverEvents = passes.map(pass => ({
-            type: 'flyover',
-            title: `Live ISS Pass over ${label}`,
-            date: new Date(pass.startUTC * 1000).toISOString(),
-            description: `A real-time pass of the ISS, reaching ${pass.maxEl}° above the horizon.`,
-            duration: Math.round(pass.duration / 60),
-            details: `<strong>Max Elevation:</strong> ${pass.maxEl}°<br><strong>Appears:</strong> ${pass.startAz}° ${pass.startAzCompass}<br><strong>Disappears:</strong> ${pass.endAz}° ${pass.endAzCompass}`
-        }));
-
-        const allEvents = [...liveFlyoverEvents, ...staticEvents];
-        const sortedEvents = allEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-        res.json(sortedEvents);
-
-    } catch (error) {
-        console.error("\n--- ERROR IN BACKEND ---");
-        console.error(error.message);
-        if (error.response) { console.error("DETAILS:", error.response.data); }
-        console.error("------------------------\n");
-        res.status(500).json({ message: "An error occurred on the server." });
-    }
-});
-
-router.get('/apod', async (req, res) => {
-    const NASA_API_KEY = process.env.NASA_API_KEY;
-    const apodUrl = `https://api.nasa.gov/planetary/apod?api_key=${NASA_API_KEY}`;
-    try {
-        const response = await axios.get(apodUrl);
-        res.json(response.data);
-    } catch (error) {
-        console.error("Error fetching APOD from NASA:", error.message);
-        res.status(500).json({ message: "Failed to fetch Picture of the Day." });
-    }
-});
-
-// NEW ROUTE ADDED HERE: Handles the globe image proxy
+// ── Globe Image Proxy ─────────────────────────────────────────────────────────
+// Proxies a high-resolution NASA earth texture to avoid CORS issues from the browser.
+// Relies on browser Cache-Control rather than node-cache (image is too large for memory).
 router.get('/globe-image', async (req, res) => {
+    const NASA_TEXTURE_URL =
+        'https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73909/world.topo.bathy.200412.3x5400x2700.jpg';
+
     try {
-        const response = await axios.get('https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73909/world.topo.bathy.200412.3x5400x2700.jpg', {
-            responseType: 'arraybuffer'
+        const response = await axios.get(NASA_TEXTURE_URL, {
+            responseType: 'arraybuffer',
+            timeout: 30000, // Large file — allow 30s
         });
+
         res.set('Content-Type', 'image/jpeg');
+        // Tell the browser to cache this for 7 days — the texture never changes.
+        res.set('Cache-Control', 'public, max-age=604800, immutable');
         res.send(Buffer.from(response.data));
     } catch (error) {
-        console.error("Failed to proxy globe image:", error);
-        res.status(500).send('Failed to fetch globe image');
+        console.error('[Globe Proxy] Failed to fetch texture:', error.message);
+        res.status(502).json({ message: 'Failed to proxy the globe image.' });
     }
 });
 
